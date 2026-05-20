@@ -1,8 +1,13 @@
-import telebot, requests, sqlite3, ast
+import telebot, requests, sqlite3, ast, os, threading, json
 from telebot import types
+from flask import Flask, request, jsonify, send_from_directory
 
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-bot = telebot.TeleBot(BOT_TOKEN)
+TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+APP_URL = os.getenv("APP_URL", "https://your-domain.com")
+PORT = int(os.getenv("PORT", 8080))
+
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__, static_folder="static")
 DB = "weather.db"
 
 conn = sqlite3.connect(DB)
@@ -95,7 +100,7 @@ WEATHER_CODES = {
     63: "🌧 Дождь", 65: "🌧 Сильный дождь", 71: "🌨 Лёгкий снег",
     73: "🌨 Снег", 75: "❄️ Сильный снег", 80: "🌧 Ливень",
     81: "🌧 Сильный ливень", 82: "🌧 Ливень", 95: "⛈ Гроза",
-    96: "⛈ Гроза с градом", 99: "⛈ Сильная гроза с градом"
+    96: "⛈ Гроза с градом", 99: "⛈ Сильная гроза с градом",
 }
 
 def db(user_id, cities=None):
@@ -108,69 +113,61 @@ def db(user_id, cities=None):
     conn.commit()
     conn.close()
 
-def weather(lat, lon):
+def get_weather(lat, lon):
     try:
-        d = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms", timeout=5).json()["current_weather"]
-        return f"{d['temperature']}°C, {d['windspeed']} м/с, {WEATHER_CODES.get(d['weathercode'], '')}"
+        d = requests.get(
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms",
+            timeout=5
+        ).json()["current_weather"]
+        return f"{d['temperature']}°C, {WEATHER_CODES.get(d['weathercode'], '')}"
     except Exception:
         return "❌ Ошибка"
 
-def show(user_id, msg):
-    cities = db(user_id)
-    if not cities:
-        return bot.send_message(user_id, "📭 Список пуст. Добавь города через поиск.")
-    text = "🌤 **Твоя погода:**\n\n"
-    mk = types.InlineKeyboardMarkup(row_width=1)
-    for c in cities:
-        lat, lon = CITIES[c]
-        text += f"**{c}**: {weather(lat, lon)}\n"
-        mk.add(types.InlineKeyboardButton(f"❌ {c}", callback_data=f"r_{c}"))
-    mk.add(types.InlineKeyboardButton("➕ Добавить город", callback_data="search"))
-    bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=mk)
-
 @bot.message_handler(commands=["start"])
 def start(m):
-    mk = types.InlineKeyboardMarkup(row_width=2)
-    mk.add(types.InlineKeyboardButton("🔍 Поиск города", callback_data="search"))
-    mk.add(types.InlineKeyboardButton("🌤 Моя погода", callback_data="my"))
-    bot.send_message(m.chat.id, "👋 Привет! Выбери действие:", reply_markup=mk)
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("🌤 Открыть погоду", web_app=types.WebAppInfo(url=APP_URL)))
+    bot.send_message(m.chat.id, "👋 Нажми кнопку ниже, чтобы открыть приложение:", reply_markup=mk)
 
-@bot.callback_query_handler(func=lambda c: True)
-def handler(call):
-    d = call.data
-    uid = call.message.chat.id
-    if d == "search":
-        bot.send_message(uid, "🔍 Введи название города:")
-        return bot.register_next_step_handler(call.message, lambda m: search(m))
-    if d == "my":
-        return show(uid, call.message)
-    if d.startswith("add_"):
-        city = d[4:]
-        cities = db(uid)
-        if city in cities:
-            return bot.answer_callback_query(call.id, "⚠️ Уже в списке!")
+@app.route("/api/cities", methods=["GET"])
+def api_cities():
+    cities = db(int(request.args["user_id"]))
+    result = []
+    for c in cities:
+        w = get_weather(*CITIES[c])
+        result.append({"name": c, "weather": w})
+    return jsonify(result)
+
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    q = request.args.get("q", "").lower().strip()
+    matches = sorted(c for c in CITIES if q in c.lower())[:15] if q else sorted(CITIES)[:15]
+    return jsonify(matches)
+
+@app.route("/api/add", methods=["POST"])
+def api_add():
+    data = request.json
+    cities = db(int(data["user_id"]))
+    city = data["city"]
+    if city not in cities:
         cities.append(city)
-        db(uid, cities)
-        bot.answer_callback_query(call.id, f"✅ {city} добавлен!")
-        return show(uid, call.message)
-    if d.startswith("r_"):
-        city = d[2:]
-        cities = db(uid)
-        if city in cities:
-            cities.remove(city)
-            db(uid, cities)
-        bot.answer_callback_query(call.id, f"🗑 {city} удалён!")
-        return show(uid, call.message)
+        db(int(data["user_id"]), cities)
+    return jsonify({"ok": True})
 
-def search(m):
-    q = m.text.strip().lower()
-    matches = [c for c in CITIES if q in c.lower()]
-    if not matches:
-        return bot.send_message(m.chat.id, "❌ Город не найден.")
-    mk = types.InlineKeyboardMarkup(row_width=1)
-    for city in matches[:10]:
-        mk.add(types.InlineKeyboardButton(city, callback_data=f"add_{city}"))
-    bot.send_message(m.chat.id, f"📍 Найдено: {len(matches)}. Выбери:", reply_markup=mk)
+@app.route("/api/remove", methods=["POST"])
+def api_remove():
+    data = request.json
+    cities = db(int(data["user_id"]))
+    city = data["city"]
+    if city in cities:
+        cities.remove(city)
+        db(int(data["user_id"]), cities)
+    return jsonify({"ok": True})
 
-print("✅ Бот запущен!")
-bot.polling(none_stop=True)
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+if __name__ == "__main__":
+    threading.Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
+    app.run(host="0.0.0.0", port=PORT, debug=False)

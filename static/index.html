@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Погода</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box }
+body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:var(--tg-theme-bg-color,#fff); color:var(--tg-theme-text-color,#222); padding:12px }
+.h { display:none }
+.card { background:var(--tg-theme-secondary-bg-color,#f5f5f5); border-radius:12px; padding:14px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center }
+.card .info { flex:1 }
+.card .name { font-size:16px; font-weight:600 }
+.card .weather { font-size:14px; color:var(--tg-theme-hint-color,#666); margin-top:4px }
+.card .del { background:none; border:none; font-size:20px; color:var(--tg-theme-link-color,#2481cc); cursor:pointer; padding:4px 8px }
+.btn { width:100%; padding:14px; border:none; border-radius:12px; font-size:16px; cursor:pointer; background:var(--tg-theme-button-color,#2481cc); color:var(--tg-theme-button-text-color,#fff); margin-top:6px }
+.btn:disabled { opacity:.5 }
+.btn-sec { background:var(--tg-theme-secondary-bg-color,#f5f5f5); color:var(--tg-theme-text-color,#222) }
+#searchPanel { margin-top:12px }
+#searchInput { width:100%; padding:12px 14px; border:2px solid var(--tg-theme-secondary-bg-color,#ddd); border-radius:12px; font-size:16px; background:var(--tg-theme-bg-color,#fff); color:var(--tg-theme-text-color,#222); outline:none }
+#searchInput:focus { border-color:var(--tg-theme-button-color,#2481cc) }
+#results { margin-top:10px }
+#results .item { padding:12px 14px; border-radius:10px; cursor:pointer; display:flex; justify-content:space-between; align-items:center }
+#results .item:hover { background:var(--tg-theme-secondary-bg-color,#f0f0f0) }
+#results .item .plus { font-size:18px; color:var(--tg-theme-button-color,#2481cc) }
+.spinner { text-align:center; padding:40px; color:var(--tg-theme-hint-color,#999) }
+.empty { text-align:center; padding:40px; color:var(--tg-theme-hint-color,#999) }
+</style>
+</head>
+<body>
+<div id="mainView">
+  <div id="list"></div>
+  <button class="btn" onclick="showSearch()">➕ Добавить город</button>
+</div>
+
+<div id="searchPanel" class="h">
+  <button class="btn btn-sec" onclick="hideSearch()">← Назад</button>
+  <input id="searchInput" placeholder="🔍 Введи название города..." oninput="search(this.value)">
+  <div id="results"></div>
+</div>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.expand();
+const userId = tg.initDataUnsafe?.user?.id;
+if (!userId) document.body.innerHTML = '<div class="empty">❌ Ошибка: не удалось получить ID пользователя</div>';
+
+async function api(path, opts = {}) {
+  const url = path + (opts.body ? '' : '?' + new URLSearchParams({ user_id: userId }));
+  const res = await fetch(url, opts.body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, ...opts.body }) } : {});
+  return res.json();
+}
+
+async function loadCities() {
+  document.getElementById('list').innerHTML = '<div class="spinner">⏳ Загрузка...</div>';
+  const cities = await api('/api/cities');
+  const list = document.getElementById('list');
+  if (!cities.length) {
+    list.innerHTML = '<div class="empty">📭 Список пуст. Добавь города.</div>';
+    return;
+  }
+  list.innerHTML = cities.map(c => `
+    <div class="card">
+      <div class="info">
+        <div class="name">${c.name}</div>
+        <div class="weather">${c.weather}</div>
+      </div>
+      <button class="del" onclick="removeCity('${c.name}')">✕</button>
+    </div>
+  `).join('');
+}
+
+async function removeCity(name) {
+  await api('/api/remove', { body: { city: name } });
+  loadCities();
+}
+
+let searchTimer;
+function search(q) {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const results = await api('/api/search?q=' + encodeURIComponent(q));
+    document.getElementById('results').innerHTML = results.map(c => `
+      <div class="item" onclick="addCity('${c}')">
+        <span>${c}</span>
+        <span class="plus">+</span>
+      </div>
+    `).join('');
+  }, 200);
+}
+
+async function addCity(name) {
+  await api('/api/add', { body: { city: name } });
+  hideSearch();
+  loadCities();
+}
+
+function showSearch() {
+  document.getElementById('mainView').classList.add('h');
+  document.getElementById('searchPanel').classList.remove('h');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('searchInput').focus();
+  search('');
+}
+
+function hideSearch() {
+  document.getElementById('searchPanel').classList.add('h');
+  document.getElementById('mainView').classList.remove('h');
+}
+
+loadCities();
+</script>
+</body>
+</html>
