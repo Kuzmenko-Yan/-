@@ -4,11 +4,14 @@ import sqlite3
 import ast
 from telebot import types
 
+# === НАСТРОЙКИ ===
 BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 bot = telebot.TeleBot(BOT_TOKEN)
-DB = "weather.db"
+DB = "weather.db"  # Файл базы данных
 
+# === БАЗА ДАННЫХ ===
 def init_db():
+    # Создаёт таблицу users: user_id и список его городов
     conn = sqlite3.connect(DB)
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
@@ -98,6 +101,8 @@ CITIES = {
     "Елец": (52.6231, 38.5058), "Рыбинск": (58.0483, 38.8583),
 }
 
+# === КОДЫ ПОГОДЫ OPEN-METEO ===
+# Расшифровка числовых кодов погоды от API
 WEATHER_CODES = {
     0: "☀️ Ясно", 1: "🌤 Преимущественно ясно", 2: "⛅ Переменная облачность",
     3: "☁️ Пасмурно", 45: "🌫 Туман", 48: "🌫 Иней", 51: "🌦 Лёгкая морось",
@@ -108,7 +113,9 @@ WEATHER_CODES = {
     96: "⛈ Гроза с градом", 99: "⛈ Сильная гроза с градом"
 }
 
+# === РАБОТА С БАЗОЙ ДАННЫХ ===
 def get_user_cities(user_id):
+    # Достаёт список городов пользователя из БД
     conn = sqlite3.connect(DB)
     cur = conn.execute("SELECT cities FROM users WHERE user_id=?", (user_id,))
     row = cur.fetchone()
@@ -116,13 +123,16 @@ def get_user_cities(user_id):
     return ast.literal_eval(row[0]) if row else []
 
 def save_user_cities(user_id, cities):
+    # Сохраняет список городов пользователя в БД
     conn = sqlite3.connect(DB)
     conn.execute("INSERT OR REPLACE INTO users (user_id, cities) VALUES (?, ?)",
                  (user_id, str(cities)))
     conn.commit()
     conn.close()
 
+# === ЗАПРОС ПОГОДЫ ===
 def get_weather(lat, lon):
+    # Запрашивает погоду через Open-Meteo API (бесплатно, без ключа)
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms"
     try:
         data = requests.get(url, timeout=5).json()
@@ -132,8 +142,10 @@ def get_weather(lat, lon):
     except Exception:
         return "❌ Ошибка загрузки"
 
+# === ОБРАБОТЧИКИ КОМАНД ===
 @bot.message_handler(commands=["start"])
 def start(message):
+    # Команда /start — показывает главное меню
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(types.InlineKeyboardButton("🔍 Поиск города", callback_data="search"))
     markup.add(types.InlineKeyboardButton("🌤 Моя погода", callback_data="my_weather"))
@@ -141,15 +153,18 @@ def start(message):
 
 @bot.callback_query_handler(func=lambda c: c.data == "search")
 def search_city(call):
+    # Кнопка поиска — запрашивает название города
     bot.send_message(call.message.chat.id, "🔍 Введи название города:")
     bot.register_next_step_handler(call.message, process_city_search)
 
 def process_city_search(message):
+    # Ищет город по введённому названию (регистронезависимо)
     query = message.text.strip().lower()
     matches = [c for c in CITIES if query in c.lower()]
     if not matches:
         bot.send_message(message.chat.id, "❌ Город не найден.")
         return
+    # Показывает до 10 результатов в виде кнопок
     markup = types.InlineKeyboardMarkup(row_width=1)
     for city in matches[:10]:
         markup.add(types.InlineKeyboardButton(city, callback_data=f"add_{city}"))
@@ -157,6 +172,7 @@ def process_city_search(message):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("add_"))
 def add_city(call):
+    # Добавляет город в список пользователя и показывает погоду
     city = call.data[4:]
     user_id = call.message.chat.id
     cities = get_user_cities(user_id)
@@ -173,6 +189,7 @@ def my_weather(call):
     show_weather(call.message)
 
 def show_weather(message):
+    # Формирует сообщение с погодой для всех городов из списка
     user_id = message.chat.id
     cities = get_user_cities(user_id)
     if not cities:
@@ -190,6 +207,7 @@ def show_weather(message):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("remove_"))
 def remove_city(call):
+    # Удаляет город из списка и обновляет экран
     city = call.data[7:]
     user_id = call.message.chat.id
     cities = get_user_cities(user_id)
@@ -199,5 +217,6 @@ def remove_city(call):
     bot.answer_callback_query(call.id, f"🗑 {city} удалён!")
     show_weather(call.message)
 
+# === ЗАПУСК БОТА ===
 print("✅ Бот запущен!")
 bot.polling(none_stop=True)
