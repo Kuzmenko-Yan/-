@@ -1,26 +1,14 @@
-import telebot
-import requests
-import sqlite3
-import ast
+import telebot, requests, sqlite3, ast
 from telebot import types
 
-# === НАСТРОЙКИ ===
 BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 bot = telebot.TeleBot(BOT_TOKEN)
-DB = "weather.db"  # Файл базы данных
+DB = "weather.db"
 
-# === БАЗА ДАННЫХ ===
-def init_db():
-    # Создаёт таблицу users: user_id и список его городов
-    conn = sqlite3.connect(DB)
-    conn.execute("""CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        cities TEXT DEFAULT '[]'
-    )""")
-    conn.commit()
-    conn.close()
-
-init_db()
+conn = sqlite3.connect(DB)
+conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, cities TEXT DEFAULT '[]')")
+conn.commit()
+conn.close()
 
 CITIES = {
     "Москва": (55.7558, 37.6173), "Санкт-Петербург": (59.9343, 30.3351),
@@ -85,24 +73,21 @@ CITIES = {
     "Новый Уренгой": (66.0833, 76.6833), "Дербент": (42.0683, 48.2927),
     "Пятигорск": (44.0498, 43.0588), "Кисловодск": (43.9104, 42.7161),
     "Березники": (59.4092, 56.8204), "Назрань": (43.2260, 44.7730),
-    "Кунгур": (57.4333, 56.9500),
-    "Арзамас": (55.3833, 43.8000), "Ессентуки": (44.0444, 42.8589),
-    "Долгопрудный": (55.9378, 37.5147), "Одинцово": (55.6794, 37.2825),
-    "Реутов": (55.7619, 37.8558), "Пушкино": (56.0106, 37.8475),
-    "Жуковский": (55.5953, 38.1200), "Бугульма": (54.5397, 52.7864),
-    "Елабуга": (55.7556, 52.0556), "Чистополь": (55.3667, 50.6333),
-    "Зеленодольск": (55.8428, 48.5078), "Лениногорск": (54.5981, 52.4472),
-    "Нижнекамск": (55.6367, 51.8206), "Азнакаево": (54.8667, 53.0667),
-    "Воткинск": (57.0500, 53.9833), "Сарапул": (56.4667, 53.8000),
-    "Глазов": (58.1333, 52.6667), "Майкоп": (44.6078, 40.1058),
-    "Ханты-Мансийск": (61.0042, 69.0019), "Нефтеюганск": (61.1000, 72.6000),
-    "Мурино": (60.0528, 30.4478),
+    "Кунгур": (57.4333, 56.9500), "Арзамас": (55.3833, 43.8000),
+    "Ессентуки": (44.0444, 42.8589), "Долгопрудный": (55.9378, 37.5147),
+    "Одинцово": (55.6794, 37.2825), "Реутов": (55.7619, 37.8558),
+    "Пушкино": (56.0106, 37.8475), "Жуковский": (55.5953, 38.1200),
+    "Бугульма": (54.5397, 52.7864), "Елабуга": (55.7556, 52.0556),
+    "Чистополь": (55.3667, 50.6333), "Зеленодольск": (55.8428, 48.5078),
+    "Лениногорск": (54.5981, 52.4472), "Нижнекамск": (55.6367, 51.8206),
+    "Азнакаево": (54.8667, 53.0667), "Воткинск": (57.0500, 53.9833),
+    "Сарапул": (56.4667, 53.8000), "Глазов": (58.1333, 52.6667),
+    "Майкоп": (44.6078, 40.1058), "Ханты-Мансийск": (61.0042, 69.0019),
+    "Нефтеюганск": (61.1000, 72.6000), "Мурино": (60.0528, 30.4478),
     "Апатиты": (67.5667, 33.3833), "Кировск": (67.6167, 33.6667),
     "Елец": (52.6231, 38.5058), "Рыбинск": (58.0483, 38.8583),
 }
 
-# === КОДЫ ПОГОДЫ OPEN-METEO ===
-# Расшифровка числовых кодов погоды от API
 WEATHER_CODES = {
     0: "☀️ Ясно", 1: "🌤 Преимущественно ясно", 2: "⛅ Переменная облачность",
     3: "☁️ Пасмурно", 45: "🌫 Туман", 48: "🌫 Иней", 51: "🌦 Лёгкая морось",
@@ -113,110 +98,79 @@ WEATHER_CODES = {
     96: "⛈ Гроза с градом", 99: "⛈ Сильная гроза с градом"
 }
 
-# === РАБОТА С БАЗОЙ ДАННЫХ ===
-def get_user_cities(user_id):
-    # Достаёт список городов пользователя из БД
+def db(user_id, cities=None):
     conn = sqlite3.connect(DB)
-    cur = conn.execute("SELECT cities FROM users WHERE user_id=?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    return ast.literal_eval(row[0]) if row else []
-
-def save_user_cities(user_id, cities):
-    # Сохраняет список городов пользователя в БД
-    conn = sqlite3.connect(DB)
-    conn.execute("INSERT OR REPLACE INTO users (user_id, cities) VALUES (?, ?)",
-                 (user_id, str(cities)))
+    if cities is None:
+        row = conn.execute("SELECT cities FROM users WHERE user_id=?", (user_id,)).fetchone()
+        conn.close()
+        return ast.literal_eval(row[0]) if row else []
+    conn.execute("INSERT OR REPLACE INTO users (user_id, cities) VALUES (?, ?)", (user_id, str(cities)))
     conn.commit()
     conn.close()
 
-# === ЗАПРОС ПОГОДЫ ===
-def get_weather(lat, lon):
-    # Запрашивает погоду через Open-Meteo API (бесплатно, без ключа)
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms"
+def weather(lat, lon):
     try:
-        data = requests.get(url, timeout=5).json()
-        cw = data["current_weather"]
-        desc = WEATHER_CODES.get(cw["weathercode"], "Неизвестно")
-        return f"{cw['temperature']}°C, {cw['windspeed']} м/с, {desc}"
+        d = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms", timeout=5).json()["current_weather"]
+        return f"{d['temperature']}°C, {d['windspeed']} м/с, {WEATHER_CODES.get(d['weathercode'], '')}"
     except Exception:
-        return "❌ Ошибка загрузки"
+        return "❌ Ошибка"
 
-# === ОБРАБОТЧИКИ КОМАНД ===
-@bot.message_handler(commands=["start"])
-def start(message):
-    # Команда /start — показывает главное меню
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(types.InlineKeyboardButton("🔍 Поиск города", callback_data="search"))
-    markup.add(types.InlineKeyboardButton("🌤 Моя погода", callback_data="my_weather"))
-    bot.send_message(message.chat.id, "👋 Привет! Выбери действие:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda c: c.data == "search")
-def search_city(call):
-    # Кнопка поиска — запрашивает название города
-    bot.send_message(call.message.chat.id, "🔍 Введи название города:")
-    bot.register_next_step_handler(call.message, process_city_search)
-
-def process_city_search(message):
-    # Ищет город по введённому названию (регистронезависимо)
-    query = message.text.strip().lower()
-    matches = [c for c in CITIES if query in c.lower()]
-    if not matches:
-        bot.send_message(message.chat.id, "❌ Город не найден.")
-        return
-    # Показывает до 10 результатов в виде кнопок
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    for city in matches[:10]:
-        markup.add(types.InlineKeyboardButton(city, callback_data=f"add_{city}"))
-    bot.send_message(message.chat.id, f"📍 Найдено: {len(matches)}. Выбери:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("add_"))
-def add_city(call):
-    # Добавляет город в список пользователя и показывает погоду
-    city = call.data[4:]
-    user_id = call.message.chat.id
-    cities = get_user_cities(user_id)
-    if city in cities:
-        bot.answer_callback_query(call.id, "⚠️ Уже в списке!")
-        return
-    cities.append(city)
-    save_user_cities(user_id, cities)
-    bot.answer_callback_query(call.id, f"✅ {city} добавлен!")
-    show_weather(call.message)
-
-@bot.callback_query_handler(func=lambda c: c.data == "my_weather")
-def my_weather(call):
-    show_weather(call.message)
-
-def show_weather(message):
-    # Формирует сообщение с погодой для всех городов из списка
-    user_id = message.chat.id
-    cities = get_user_cities(user_id)
+def show(user_id, msg):
+    cities = db(user_id)
     if not cities:
-        bot.send_message(user_id, "📭 Список пуст. Добавь города через поиск.")
-        return
+        return bot.send_message(user_id, "📭 Список пуст. Добавь города через поиск.")
     text = "🌤 **Твоя погода:**\n\n"
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    for city in cities:
-        lat, lon = CITIES[city]
-        weather = get_weather(lat, lon)
-        text += f"**{city}**: {weather}\n"
-        markup.add(types.InlineKeyboardButton(f"❌ {city}", callback_data=f"remove_{city}"))
-    markup.add(types.InlineKeyboardButton("➕ Добавить город", callback_data="search"))
-    bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=markup)
+    mk = types.InlineKeyboardMarkup(row_width=1)
+    for c in cities:
+        lat, lon = CITIES[c]
+        text += f"**{c}**: {weather(lat, lon)}\n"
+        mk.add(types.InlineKeyboardButton(f"❌ {c}", callback_data=f"r_{c}"))
+    mk.add(types.InlineKeyboardButton("➕ Добавить город", callback_data="search"))
+    bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=mk)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("remove_"))
-def remove_city(call):
-    # Удаляет город из списка и обновляет экран
-    city = call.data[7:]
-    user_id = call.message.chat.id
-    cities = get_user_cities(user_id)
-    if city in cities:
-        cities.remove(city)
-        save_user_cities(user_id, cities)
-    bot.answer_callback_query(call.id, f"🗑 {city} удалён!")
-    show_weather(call.message)
+@bot.message_handler(commands=["start"])
+def start(m):
+    mk = types.InlineKeyboardMarkup(row_width=2)
+    mk.add(types.InlineKeyboardButton("🔍 Поиск города", callback_data="search"))
+    mk.add(types.InlineKeyboardButton("🌤 Моя погода", callback_data="my"))
+    bot.send_message(m.chat.id, "👋 Привет! Выбери действие:", reply_markup=mk)
 
-# === ЗАПУСК БОТА ===
+@bot.callback_query_handler(func=lambda c: True)
+def handler(call):
+    d = call.data
+    uid = call.message.chat.id
+    if d == "search":
+        bot.send_message(uid, "🔍 Введи название города:")
+        return bot.register_next_step_handler(call.message, lambda m: search(m))
+    if d == "my":
+        return show(uid, call.message)
+    if d.startswith("add_"):
+        city = d[4:]
+        cities = db(uid)
+        if city in cities:
+            return bot.answer_callback_query(call.id, "⚠️ Уже в списке!")
+        cities.append(city)
+        db(uid, cities)
+        bot.answer_callback_query(call.id, f"✅ {city} добавлен!")
+        return show(uid, call.message)
+    if d.startswith("r_"):
+        city = d[2:]
+        cities = db(uid)
+        if city in cities:
+            cities.remove(city)
+            db(uid, cities)
+        bot.answer_callback_query(call.id, f"🗑 {city} удалён!")
+        return show(uid, call.message)
+
+def search(m):
+    q = m.text.strip().lower()
+    matches = [c for c in CITIES if q in c.lower()]
+    if not matches:
+        return bot.send_message(m.chat.id, "❌ Город не найден.")
+    mk = types.InlineKeyboardMarkup(row_width=1)
+    for city in matches[:10]:
+        mk.add(types.InlineKeyboardButton(city, callback_data=f"add_{city}"))
+    bot.send_message(m.chat.id, f"📍 Найдено: {len(matches)}. Выбери:", reply_markup=mk)
+
 print("✅ Бот запущен!")
 bot.polling(none_stop=True)
