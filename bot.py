@@ -3,24 +3,34 @@ import requests
 
 # Замени на свой токен от @BotFather
 BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-# Замени на свой ключ от https://openweathermap.org/api
-WEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Координаты Владивостока
+LAT, LON = 43.1155, 131.8855
+
 def get_weather():
-    city = "Vladivostok"
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang=ru"
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&current_weather=true&windspeed_unit=ms"
     try:
-        response = requests.get(url).json()
-        if response.get("cod") == 200:
-            temp = response["main"]["temp"]
-            desc = response["weather"][0]["description"]
-            wind = response["wind"]["speed"]
-            return f" Владивосток\n🌡 Температура: {temp}°C\n💨 Ветер: {wind} м/с\n {desc.capitalize()}"
-        return "❌ Не удалось получить погоду"
+        data = requests.get(url).json()
+        temp = data["current_weather"]["temperature"]
+        wind = data["current_weather"]["windspeed"]
+        code = data["current_weather"]["weathercode"]
+        
+        weather_desc = {
+            0: "☀️ Ясно", 1: " Преимущественно ясно", 2: "⛅ Переменная облачность",
+            3: "☁️ Пасмурно", 45: "🌫 Туман", 48: "🌫 Иней", 51: " Лёгкая морось",
+            53: "🌦 Морось", 55: "🌧 Сильная морось", 61: "🌧 Лёгкий дождь",
+            63: "🌧 Дождь", 65: "🌧 Сильный дождь", 71: "🌨 Лёгкий снег",
+            73: "🌨 Снег", 75: "❄️ Сильный снег", 80: "🌧 Ливень",
+            81: "🌧 Сильный ливень", 82: " Ливень", 95: "⛈ Гроза",
+            96: "⛈ Гроза с градом", 99: "⛈ Сильная гроза с градом"
+        }
+        desc = weather_desc.get(code, " Неизвестно")
+        
+        return f"📍 Владивосток\n Температура: {temp}°C\n Ветер: {wind} м/с\n{desc}"
     except Exception:
-        return "❌ Ошибка подключения"
+        return "❌ Не удалось получить погоду"
 
 @bot.message_handler(commands=["start", "weather"])
 def send_weather(message):
