@@ -16,6 +16,6 @@ jobs:
           import os,json,urllib.request
           d=open('/tmp/d.txt').read().strip()[:3000] or 'no diff'
           b=json.dumps({'model':'google/gemini-3.1-pro-preview','messages':[{'role':'user','content':'Review:\n'+d}]})
-          r=json.loads(urllib.request.urlopen(urllib.request.Request('https://routerai.ru/v1/chat/completions',data=b.encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROUTERAI_KEY']}),timeout=30).read())
+          r=json.loads(urllib.request.urlopen(urllib.request.Request('https://routerai.ru/api/v1/chat/completions',data=b.encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROUTERAI_KEY']}),timeout=30).read())
           print(r['choices'][0]['message']['content'])
           "
