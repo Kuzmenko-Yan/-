@@ -7,22 +7,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Run Gemini review
+      - name: Debug RouterAI error
         env:
           ROUTERAI_KEY: ${{ secrets.ROUTERAI_KEY }}
         run: |
-          git diff HEAD~1 -- . > /tmp/d.txt 2>/dev/null || echo "init" > /tmp/d.txt
-          sleep 5
           python3 -c "
-          import os,json,urllib.request,time
-          d=open('/tmp/d.txt').read().strip()[:3000] or 'no diff'
-          b=json.dumps({'model':'google/gemini-3.1-pro-preview','messages':[{'role':'user','content':'Review:\n'+d}]})
-          for i in range(3):
-            try:
-              r=json.loads(urllib.request.urlopen(urllib.request.Request('https://routerai.ru/api/v1/chat/completions',data=b.encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROUTERAI_KEY']}),timeout=30).read())
-              print(r['choices'][0]['message']['content'])
-              break
-            except Exception as e:
-              if i<2: time.sleep(10)
-              else: raise e
+          import os,json,urllib.request
+          b=json.dumps({'model':'google/gemini-3.1-pro-preview','messages':[{'role':'user','content':'test'}]})
+          req=urllib.request.Request('https://routerai.ru/api/v1/chat/completions',data=b.encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ROUTERAI_KEY']})
+          try:
+            r=urllib.request.urlopen(req,timeout=15)
+            print(r.read().decode())
+          except urllib.error.HTTPError as e:
+            print(f'CODE: {e.code}')
+            print(f'BODY: {e.read().decode()}')
           "
