@@ -10,23 +10,30 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Get diff
-        run: git diff HEAD~1 > diff.txt
-
       - name: Ask Gemini to review
-        id: gemini
         env:
           ROUTERAI_KEY: ${{ secrets.ROUTERAI_KEY }}
         run: |
-          DIFF=$(cat diff.txt | head -500)
-          JSON=$(jq -n --arg diff "$DIFF" '{
-            model: "google/gemini-3.1-pro-preview",
-            messages: [
-              {role: "user", content: "Проверь код-ревью этих изменений (коротко, на русском):\n\n" + $diff}
-            ]
-          }')
-          curl -s https://routerai.ru/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $ROUTERAI_KEY" \
-            -d "$JSON" > response.json
-          cat response.json | jq -r '.choices[0].message.content'
+          git diff HEAD~1 -- . > /tmp/diff.txt 2>/dev/null || echo "Initial" > /tmp/diff.txt
+          python3 << 'EOF'
+import os, json, urllib.request
+
+with open("/tmp/diff.txt") as f:
+    diff = f.read().strip()
+
+if not diff or diff == "Initial":
+    diff = "Initial commit (no previous diff)"
+
+body = json.dumps({
+    "model": "google/gemini-3.1-pro-preview",
+    "messages": [{"role": "user", "content": f"Короткое ревью кода на русском:\n\n{diff[:3000]}"}]
+})
+req = urllib.request.Request(
+    "https://routerai.ru/v1/chat/completions",
+    data=body.encode(),
+    headers={"Content-Type": "application/json",
+             "Authorization": "Bearer " + os.environ["ROUTERAI_KEY"]}
+)
+resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+print(resp["choices"][0]["message"]["content"])
+EOF
