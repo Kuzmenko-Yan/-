@@ -21,3 +21,5 @@
 3. `python bot.py`
 
 API: Open-Meteo (бесплатно, без регистрации).
+
+Test Gemini workflow
