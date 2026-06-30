@@ -41,14 +41,21 @@ body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:var(-
 </div>
 
 <script>
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
+}
+
 const tg = window.Telegram.WebApp;
 tg.expand();
+const initData = tg.initData;
 const userId = tg.initDataUnsafe?.user?.id;
-if (!userId) document.body.innerHTML = '<div class="empty">❌ Ошибка: не удалось получить ID пользователя</div>';
+if (!userId || !initData) document.body.innerHTML = '<div class="empty">❌ Ошибка: не удалось получить ID пользователя</div>';
 
 async function api(path, opts = {}) {
-  const url = path + (opts.body ? '' : '?' + new URLSearchParams({ user_id: userId }));
-  const res = await fetch(url, opts.body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, ...opts.body }) } : {});
+  const body = { init_data: initData, ...opts.body };
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return res.json();
 }
 
@@ -63,38 +70,54 @@ async function loadCities() {
   list.innerHTML = cities.map(c => `
     <div class="card">
       <div class="info">
-        <div class="name">${c.name}</div>
-        <div class="weather">${c.weather}</div>
+        <div class="name">${escapeHtml(c.name)}</div>
+        <div class="weather">${escapeHtml(c.weather)}</div>
       </div>
-      <button class="del" onclick="removeCity('${c.name}')">✕</button>
+      <button class="del" data-city="${escapeHtml(c.name)}">✕</button>
     </div>
   `).join('');
 }
 
+// Делегирование событий для удаления города
 async function removeCity(name) {
   await api('/api/remove', { body: { city: name } });
   loadCities();
 }
 
+document.getElementById('list').addEventListener('click', (e) => {
+  const btn = e.target.closest('.del');
+  if (btn && btn.dataset.city) {
+    removeCity(btn.dataset.city);
+  }
+});
+
 let searchTimer;
 function search(q) {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
-    const results = await api('/api/search?q=' + encodeURIComponent(q));
+    const results = await api('/api/search', { body: { q } });
     document.getElementById('results').innerHTML = results.map(c => `
-      <div class="item" onclick="addCity('${c}')">
-        <span>${c}</span>
+      <div class="item" data-city="${escapeHtml(c)}">
+        <span>${escapeHtml(c)}</span>
         <span class="plus">+</span>
       </div>
     `).join('');
   }, 200);
 }
 
+// Делегирование событий для добавления города
 async function addCity(name) {
   await api('/api/add', { body: { city: name } });
   hideSearch();
   loadCities();
 }
+
+document.getElementById('results').addEventListener('click', (e) => {
+  const item = e.target.closest('.item');
+  if (item && item.dataset.city) {
+    addCity(item.dataset.city);
+  }
+});
 
 function showSearch() {
   document.getElementById('mainView').classList.add('h');
