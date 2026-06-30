@@ -1,8 +1,50 @@
-import telebot, requests, sqlite3, ast, os, threading, json
+import telebot, requests, sqlite3, ast, os, threading, json, hmac, hashlib
 from telebot import types
 from flask import Flask, request, jsonify, send_from_directory
 
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
+
+def verify_telegram_init_data(init_data_str):
+    """Проверяет HMAC-SHA256 подпись Telegram initData.
+    Возвращает словарь с проверенными данными или None при ошибке."""
+    if not init_data_str:
+        return None
+    params = {}
+    for pair in init_data_str.split('&'):
+        if '=' not in pair:
+            continue
+        k, v = pair.split('=', 1)
+        params[k] = v
+    received_hash = params.pop('hash', None)
+    if not received_hash:
+        return None
+    # Строим check_string: параметры сортируются по ключу, соединяются \n
+    check_arr = []
+    for k in sorted(params.keys()):
+        check_arr.append(f"{k}={params[k]}")
+    check_string = "\n".join(check_arr)
+    # HMAC-SHA256: secret_key = SHA256(bot_token)
+    secret_key = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed_hash, received_hash):
+        return None
+    return params
+
+def get_user_id_from_init_data(init_data_str):
+    """Извлекает user_id из проверенной initData."""
+    params = verify_telegram_init_data(init_data_str)
+    if not params:
+        return None
+    # user закодирован в JSON
+    user_json = params.get('user')
+    if not user_json:
+        return None
+    try:
+        import urllib.parse
+        user = json.loads(urllib.parse.unquote(user_json))
+        return user.get('id')
+    except (json.JSONDecodeError, KeyError):
+        return None
 APP_URL = os.getenv("APP_URL", "https://your-domain.com")
 PORT = int(os.getenv("PORT", 8080))
 
@@ -129,39 +171,59 @@ def start(m):
     mk.add(types.InlineKeyboardButton("🌤 Открыть погоду", web_app=types.WebAppInfo(url=APP_URL)))
     bot.send_message(m.chat.id, "👋 Нажми кнопку ниже, чтобы открыть приложение:", reply_markup=mk)
 
-@app.route("/api/cities", methods=["GET"])
+def _require_auth():
+    """Извлекает user_id из init_data в теле POST-запроса.
+    Возвращает (user_id, error_response) — один из них всегда None."""
+    data = request.json or {}
+    init_data = data.get('init_data', '')
+    user_id = get_user_id_from_init_data(init_data)
+    if user_id is None:
+        return None, (jsonify({"error": "unauthorized"}), 401)
+    return user_id, None
+
+@app.route("/api/cities", methods=["POST"])
 def api_cities():
-    cities = db(int(request.args["user_id"]))
+    user_id, err = _require_auth()
+    if err:
+        return err
+    cities = db(int(user_id))
     result = []
     for c in cities:
         w = get_weather(*CITIES[c])
         result.append({"name": c, "weather": w})
     return jsonify(result)
 
-@app.route("/api/search", methods=["GET"])
+@app.route("/api/search", methods=["POST"])
 def api_search():
-    q = request.args.get("q", "").lower().strip()
+    data = request.json or {}
+    q = data.get("q", "").lower().strip()
     matches = sorted(c for c in CITIES if q in c.lower())[:15] if q else sorted(CITIES)[:15]
     return jsonify(matches)
 
 @app.route("/api/add", methods=["POST"])
 def api_add():
+    user_id, err = _require_auth()
+    if err:
+        return err
     data = request.json
-    cities = db(int(data["user_id"]))
+    cities = db(int(user_id))
     city = data["city"]
     if city not in cities:
         cities.append(city)
-        db(int(data["user_id"]), cities)
+        db(int(user_id), cities)
     return jsonify({"ok": True})
 
 @app.route("/api/remove", methods=["POST"])
 def api_remove():
+    user_id, err = _require_auth()
+    if err:
+        return err
     data = request.json
-    cities = db(int(data["user_id"]))
+    cities = db(int(user_id))
     city = data["city"]
     if city in cities:
         cities.remove(city)
-        db(int(data["user_id"]), cities)
+        db(int(user_id), cities)
     return jsonify({"ok": True})
 
 @app.route("/")
